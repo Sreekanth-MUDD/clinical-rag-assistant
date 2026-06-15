@@ -1,0 +1,16 @@
+# Ignore Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore virtual environments
+venv/
+.env
+
+# Ignore logs
+*.log
+
+# Ignore backend cache
+backend/.env.example
+backend/.env
+backend/app/__pycache__/
