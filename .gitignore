@@ -9,3 +9,8 @@ venv/
 
 # Ignore logs
 *.log
+
+# Ignore backend cache
+backend/.env.example
+backend/.env
+backend/app/__pycache__/
