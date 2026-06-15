@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sanofi RCG Scientific Assistant</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Main Stylesheet -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="dark-theme">
+    <!-- Background Blur Orbs -->
+    <div class="blur-orb orb-1"></div>
+    <div class="blur-orb orb-2"></div>
+    <div class="blur-orb orb-3"></div>
+
+    <!-- Auth Container -->
+    <div id="auth-container" class="auth-container">
+        <div class="auth-card glass-panel">
+            <div class="auth-logo">
+                <svg viewBox="0 0 100 100" class="logo-svg">
+                    <circle cx="50" cy="50" r="45" fill="none" stroke="url(#logo-grad)" stroke-width="8" stroke-dasharray="200 80"/>
+                    <path d="M30 50 Q50 20 70 50 T70 80" fill="none" stroke="url(#logo-grad)" stroke-width="6" stroke-linecap="round"/>
+                    <circle cx="50" cy="50" r="10" fill="#fff"/>
+                    <defs>
+                        <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#a855f7" />
+                            <stop offset="100%" stop-color="#3b82f6" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <h2>sanofi</h2>
+                <p class="subtitle">RCG Scientific Assistant</p>
+            </div>
+
+            <!-- Login Form -->
+            <form id="login-form" class="auth-form">
+                <h3>Sign In</h3>
+                <div class="input-group">
+                    <label for="login-username">Username</label>
+                    <input type="text" id="login-username" required placeholder="Enter your username">
+                </div>
+                <div class="input-group">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" required placeholder="Enter your password">
+                </div>
+                <button type="submit" id="btn-login" class="btn-primary">Sign In</button>
+                <p class="toggle-auth-msg">New here? <a href="#" id="go-to-register">Create an account</a></p>
+            </form>
+
+            <!-- Register Form -->
+            <form id="register-form" class="auth-form hidden">
+                <h3>Register Account</h3>
+                <div class="input-group">
+                    <label for="register-username">Username</label>
+                    <input type="text" id="register-username" required placeholder="Choose a username">
+                </div>
+                <div class="input-group">
+                    <label for="register-password">Password</label>
+                    <input type="password" id="register-password" required placeholder="Choose a password (min 6 chars)">
+                </div>
+                <button type="submit" id="btn-register" class="btn-primary">Create Account</button>
+                <p class="toggle-auth-msg">Already have an account? <a href="#" id="go-to-login">Sign In</a></p>
+            </form>
+        </div>
+    </div>
+
+    <!-- Main App Container -->
+    <div id="app-container" class="app-container hidden">
+        <!-- Navigation Header -->
+        <header class="main-header glass-panel">
+            <div class="header-logo">
+                <svg viewBox="0 0 100 100" class="logo-svg-small">
+                    <circle cx="50" cy="50" r="45" fill="none" stroke="url(#header-logo-grad)" stroke-width="8" stroke-dasharray="200 80"/>
+                    <path d="M30 50 Q50 20 70 50 T70 80" fill="none" stroke="url(#header-logo-grad)" stroke-width="6" stroke-linecap="round"/>
+                    <circle cx="50" cy="50" r="10" fill="#fff"/>
+                    <defs>
+                        <linearGradient id="header-logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#a855f7" />
+                            <stop offset="100%" stop-color="#3b82f6" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <span class="brand-name">sanofi</span>
+                <span class="divider">|</span>
+                <span class="portal-name">RCG Scientific Assistant</span>
+            </div>
+            
+            <nav class="nav-links">
+                <a href="#" class="nav-link active" id="nav-experiments">Experiments</a>
+                <a href="https://www.sanofi.com" target="_blank" class="nav-link">Documentation</a>
+            </nav>
+
+            <div class="header-actions">
+                <span id="user-display" class="user-display">clinical_guy</span>
+                <button id="btn-logout" class="btn-secondary">Log Out</button>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Sidebar Panel: Controls & Create -->
+            <section class="side-controls">
+                <div class="glass-panel card-panel">
+                    <h3>Experiment Controls</h3>
+                    <p class="panel-desc">Select experiments in the list to enable vector scoping or cross-document clinical analysis. You can also create a new experiment run.</p>
+                    <button id="btn-new-exp-modal" class="btn-primary flex-center">
+                        <svg class="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        New RCG Experiment
+                    </button>
+                </div>
+                
+                <div class="glass-panel card-panel stats-panel">
+                    <h4>Current Scope Selection</h4>
+                    <div id="selected-list-placeholder" class="selected-list-placeholder">
+                        No experiments selected. Check boxes in the table to load documentation into the AI.
+                    </div>
+                    <div id="selected-experiments-chips" class="selected-experiments-chips hidden"></div>
+                </div>
+            </section>
+
+            <!-- Table Panel: Experiment List -->
+            <section class="table-container-section">
+                <div class="glass-panel table-panel">
+                    <div class="table-header-row">
+                        <h3>RCG Models & Experiments</h3>
+                        <div class="table-actions">
+                            <input type="text" id="experiment-search" placeholder="Search experiments...">
+                        </div>
+                    </div>
+
+                    <div class="table-scroll-wrapper">
+                        <table id="experiments-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px;"><input type="checkbox" id="check-all-experiments"></th>
+                                    <th>Experiment Name</th>
+                                    <th>Disease Area</th>
+                                    <th>DS Model Type</th>
+                                    <th>Status</th>
+                                    <th>Date Created</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="experiments-tbody">
+                                <!-- Loaded dynamically via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Create Experiment Modal -->
+    <div id="new-experiment-modal" class="modal hidden">
+        <div class="modal-content glass-panel">
+            <div class="modal-header">
+                <h3>Create New RCG Experiment Run</h3>
+                <button class="btn-close" id="btn-close-modal">&times;</button>
+            </div>
+            <form id="new-experiment-form">
+                <div class="input-group">
+                    <label for="exp-name">Experiment / Analysis Run Name</label>
+                    <input type="text" id="exp-name" required placeholder="e.g. Crohn_Trial_Comparator_2026">
+                </div>
+                <div class="input-group">
+                    <label for="exp-disease">Disease Area / Cohort</label>
+                    <input type="text" id="exp-disease" required placeholder="e.g. Crohn's Disease">
+                </div>
+                <div class="input-group">
+                    <label for="exp-model-type">Data Science Model Type</label>
+                    <select id="exp-model-type" required>
+                        <option value="Prognostic Model">Prognostic Model</option>
+                        <option value="Endpoint Analysis Model">Endpoint Analysis Model</option>
+                        <option value="Natural History of Disease Model">Natural History of Disease Model</option>
+                        <option value="Comparator Study">Comparator Study</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" id="btn-cancel-modal">Cancel</button>
+                    <button type="submit" class="btn-primary">Create Run</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Document Upload / Management Modal -->
+    <div id="docs-modal" class="modal hidden">
+        <div class="modal-content glass-panel docs-modal-content">
+            <div class="modal-header">
+                <h3 id="docs-modal-title">Clinical Documents: Experiment</h3>
+                <button class="btn-close" id="btn-close-docs-modal">&times;</button>
+            </div>
+            <div class="docs-modal-body">
+                <!-- Upload Box -->
+                <div class="upload-dropzone" id="upload-dropzone">
+                    <svg class="upload-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                    </svg>
+                    <p class="upload-text">Drag & Drop Experiment PDF here, or <span class="browse-link">browse files</span></p>
+                    <input type="file" id="doc-file-input" accept="application/pdf" class="hidden">
+                    <span class="file-limits">Only PDF documents are supported for clinical analysis.</span>
+                </div>
+
+                <div class="docs-list-section">
+                    <h4>Ingested Clinical Analyses</h4>
+                    <div class="docs-scroll-list" id="docs-scroll-list">
+                        <!-- Loaded dynamically via JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating AI Assistant Button (Only visible if experiments selected) -->
+    <button id="btn-chat-trigger" class="chat-trigger-btn hidden" title="Open Scientific Assistant">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="chat-trigger-icon">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        <span class="badge hidden" id="chat-badge">0</span>
+    </button>
+
+    <!-- Side Chat Widget Drawer -->
+    <div id="chat-sidebar" class="chat-sidebar glass-panel-dark">
+        <div class="chat-header">
+            <div class="chat-title-container">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="assistant-header-icon">
+                    <path d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12A10 10 0 0 1 12 2z"/>
+                    <path d="M12 6v12M6 12h12"/>
+                </svg>
+                <div>
+                    <h4>RCG Scientific Assistant</h4>
+                    <p id="chat-scoped-sub" class="chat-sub">Scoped: 0 experiments</p>
+                </div>
+            </div>
+            <button class="btn-close-chat" id="btn-close-chat">&times;</button>
+        </div>
+
+        <!-- Scoped Chunks/Documents Drawer -->
+        <div class="chat-scope-info" id="chat-scope-info">
+            <!-- Dynamically populated selected documents list -->
+        </div>
+
+        <div class="chat-messages" id="chat-messages">
+            <div class="message assistant-message glass-message">
+                <p>Hello! I am your RCG Scientific Assistant. I have indexed the clinical documents from your selected experiments.</p>
+                <p>Ask me anything regarding statistical results, comparator outcomes, patient demographics, endpoints, or formulas across these analysis sets.</p>
+            </div>
+        </div>
+
+        <!-- Chat Input Form -->
+        <div class="chat-input-container">
+            <div id="sources-preview" class="sources-preview hidden">
+                <h5>Cited Sources in Retrieval:</h5>
+                <div class="sources-carousel" id="sources-carousel"></div>
+            </div>
+            
+            <form id="chat-form" class="chat-form">
+                <input type="text" id="chat-input" required placeholder="Ask a question about your clinical results...">
+                <button type="submit" id="btn-send-chat" class="btn-send">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="send-icon">
+                        <line x1="22" y1="2" x2="11" y2="13"/>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                    </svg>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Alert System -->
+    <div id="alert-toast" class="alert-toast hidden">
+        <span id="alert-toast-message">Notification message</span>
+    </div>
+</body>
+</html>
