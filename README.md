@@ -219,8 +219,8 @@ SECRET_KEY=your_strong_random_key_here
 OPENAI_API_KEY=sk-...  # or leave empty for Ollama
 
 # Database (change default credentials for production)
-DATABASE_URL=postgresql+asyncpg://***REMOVED***:strong_password@localhost:5432/***REMOVED***
-DATABASE_SYNC_URL=postgresql+psycopg://***REMOVED***:strong_password@localhost:5432/***REMOVED***
+DATABASE_URL=postgresql+asyncpg://admin:strong_password@localhost:5432/***REMOVED***
+DATABASE_SYNC_URL=postgresql+psycopg://admin:strong_password@localhost:5432/***REMOVED***
 
 # LLM Provider
 LLM_PROVIDER=openai  # or 'ollama'
