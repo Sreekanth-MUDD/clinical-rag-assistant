@@ -1,4 +1,4 @@
-# Sanofi RCG Scientific Assistant
+#   RCG Scientific Assistant
 
 *A Retrieval-Augmented Generation (RAG) System for Clinical Documents*
 
@@ -8,7 +8,7 @@
 
 Clinical research produces **vast volumes of complex documentation** — endpoint models, prognostic models, and natural history of disease studies. These documents are often locked inside lengthy PDFs, making it difficult for researchers to quickly extract insights, compare trials, or validate endpoints.
 
-The **Sanofi RCG Scientific Assistant** transforms static documents into **interactive, queryable knowledge**. By combining document ingestion, vector search, reranking, and LLM synthesis, researchers can:
+The ** RCG Scientific Assistant** transforms static documents into **interactive, queryable knowledge**. By combining document ingestion, vector search, reranking, and LLM synthesis, researchers can:
 
 - Rapidly ingest experiment results  
 - Ask natural language questions  
@@ -154,7 +154,7 @@ Registration / Login
 - **Dual LLM Providers**: Configurable switch between **OpenAI GPT-4o** and local **Ollama** models (`llama3`).  
 - **Real-Time Streaming**: SSE token-by-token streaming for conversational exploration.  
 - **Secure Access**: JWT-based authentication with password strength validation.  
-- **Premium UI**: Sanofi-branded galactic-dark theme with glassmorphism panels, blur orbs, and micro-animations.  
+- **Premium UI**: branded galactic-dark theme with glassmorphism panels, blur orbs, and micro-animations.  
 
 ---
 
@@ -311,7 +311,7 @@ Restart backend → all processing remains **on-premise**, no API calls to exter
 
 ## 📌 Conclusion
 
-The **Sanofi RCG Scientific Assistant** is a **new paradigm for clinical research knowledge management**. By combining structured ingestion, vector search, reranking, and LLM synthesis, it empowers researchers to move faster, compare smarter, and trust their insights.
+The ** RCG Scientific Assistant** is a **new paradigm for clinical research knowledge management**. By combining structured ingestion, vector search, reranking, and LLM synthesis, it empowers researchers to move faster, compare smarter, and trust their insights.
 
 ---
 
