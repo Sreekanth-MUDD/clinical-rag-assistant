@@ -219,8 +219,8 @@ SECRET_KEY=your_strong_random_key_here
 OPENAI_API_KEY=sk-...  # or leave empty for Ollama
 
 # Database (change default credentials for production)
-DATABASE_URL=postgresql+asyncpg://sanofi_admin:strong_password@localhost:5432/rag_clinical_db
-DATABASE_SYNC_URL=postgresql+psycopg://sanofi_admin:strong_password@localhost:5432/rag_clinical_db
+DATABASE_URL=postgresql+asyncpg://admin:strong_password@localhost:5432/rag_clinical_db
+DATABASE_SYNC_URL=postgresql+psycopg://admin:strong_password@localhost:5432/rag_clinical_db
 
 # LLM Provider
 LLM_PROVIDER=openai  # or 'ollama'
