@@ -1,14 +1,14 @@
 import os
 import logging
 import asyncio
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from pypdf import PdfReader
 import pdfplumber
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update
 
-from langchain_text_splitters  import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document as LCDocument
 from app.config import settings
 from app.database import Document as DBDocument, Experiment, AsyncSessionLocal, USE_POSTGRES
@@ -27,13 +27,19 @@ except ImportError:
         PGVector = None
         logger.warning("PGVector package not found! Please check requirements.txt.")
 
-# Try importing OpenAI and Ollama embeddings/models
+# Try importing OpenAI embeddings/models
 try:
     from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 except ImportError:
-    from langchain_community.embeddings import OpenAIEmbeddings
-    from langchain_community.chat_models import ChatOpenAI
+    try:
+        from langchain_community.embeddings import OpenAIEmbeddings
+        from langchain_community.chat_models import ChatOpenAI
+    except ImportError:
+        OpenAIEmbeddings = None
+        ChatOpenAI = None
+        logger.warning("OpenAI packages not available. Fallback disabled.")
 
+# Try importing Ollama embeddings/models
 try:
     from langchain_ollama import OllamaEmbeddings, ChatOllama
 except ImportError:
@@ -45,53 +51,22 @@ except ImportError:
         ChatOllama = None
         logger.warning("Ollama LangChain integrations not fully available.")
 
-# Sentence Transformers for Reranking (optional fallback)
+# Import BGE embeddings for high-quality local embeddings
 try:
-    from sentence_transformers import CrossEncoder
+    from sentence_transformers import SentenceTransformer, CrossEncoder
+    bge_model = SentenceTransformer(settings.BGE_MODEL_NAME)
     reranker_model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-    logger.info("CrossEncoder reranker loaded successfully.")
+    logger.info(f"BGE model '{settings.BGE_MODEL_NAME}' and CrossEncoder reranker loaded successfully.")
 except Exception as e:
+    bge_model = None
     reranker_model = None
-    logger.warning(f"Could not load SentenceTransformers CrossEncoder: {e}. Reranking will be bypassed.")
-
-# Helper to resolve Embeddings
-def get_embeddings():
-    if settings.LLM_PROVIDER == "openai":
-        return OpenAIEmbeddings(
-            model="text-embedding-3-small",
-            openai_api_key=settings.OPENAI_API_KEY
-        )
-    else:
-        if OllamaEmbeddings is None:
-            raise ValueError("OllamaEmbeddings is not available.")
-        return OllamaEmbeddings(
-            base_url=settings.OLLAMA_BASE_URL,
-            model=settings.OLLAMA_EMBEDDING_MODEL
-        )
-
-# Helper to resolve LLM
-def get_llm():
-    if settings.LLM_PROVIDER == "openai":
-        return ChatOpenAI(
-            model="gpt-4o",
-            openai_api_key=settings.OPENAI_API_KEY,
-            temperature=0.2,
-            streaming=True
-        )
-    else:
-        if ChatOllama is None:
-            raise ValueError("ChatOllama is not available.")
-        return ChatOllama(
-            base_url=settings.OLLAMA_BASE_URL,
-            model=settings.OLLAMA_LLM_MODEL,
-            temperature=0.2,
-            streaming=True
-        )
+    logger.warning(f"Could not load SentenceTransformers models: {e}. Fallback to Ollama embeddings.")
 
 import json
 import numpy as np
 
 class InMemoryVectorStore:
+    """In-memory vector store for development/testing without database."""
     def __init__(self, embeddings):
         self.embeddings = embeddings
         self.store_path = "./data/local_vector_store.json"
@@ -171,6 +146,83 @@ class InMemoryVectorStore:
             for item in top_k
         ]
 
+class BGEEmbeddings:
+    """Wrapper for BGE embeddings via sentence-transformers."""
+    def __init__(self, model_name: str = settings.BGE_MODEL_NAME):
+        self.model = SentenceTransformer(model_name)
+    
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """Embed a list of documents efficiently in batches."""
+        return self.model.encode(texts, batch_size=settings.EMBEDDING_BATCH_SIZE, convert_to_numpy=True).tolist()
+    
+    def embed_query(self, text: str) -> List[float]:
+        """Embed a single query."""
+        return self.model.encode(text, convert_to_numpy=True).tolist()
+
+# Helper to resolve Embeddings
+def get_embeddings():
+    """Get embeddings with priority: BGE > Ollama > OpenAI."""
+    try:
+        if settings.USE_BGE_EMBEDDING and settings.EMBEDDING_PROVIDER == "bge":
+            logger.info(f"Using BGE embeddings: {settings.BGE_MODEL_NAME}")
+            return BGEEmbeddings(settings.BGE_MODEL_NAME)
+    except Exception as e:
+        logger.warning(f"Failed to load BGE embeddings: {e}. Falling back to Ollama.")
+    
+    if settings.LLM_PROVIDER == "ollama":
+        if OllamaEmbeddings is None:
+            raise ValueError("OllamaEmbeddings is not available.")
+        logger.info(f"Using Ollama embeddings: {settings.OLLAMA_EMBEDDING_MODEL}")
+        return OllamaEmbeddings(
+            base_url=settings.OLLAMA_BASE_URL,
+            model=settings.OLLAMA_EMBEDDING_MODEL
+        )
+    
+    if OpenAIEmbeddings is not None:
+        logger.info("Using OpenAI embeddings (fallback)")
+        return OpenAIEmbeddings(
+            model="text-embedding-3-small",
+            openai_api_key=settings.OPENAI_API_KEY
+        )
+    
+    raise ValueError("No embedding provider available!")
+
+# Helper to resolve LLM with fallback mechanism
+def get_llm(force_provider: Optional[str] = None) -> Any:
+    """Get LLM with automatic fallback mechanism."""
+    primary_provider = force_provider or settings.LLM_PROVIDER
+    
+    if primary_provider == "ollama":
+        try:
+            if ChatOllama is None:
+                raise ValueError("ChatOllama is not available.")
+            logger.info(f"Using Ollama LLM: {settings.OLLAMA_LLM_MODEL}")
+            return ChatOllama(
+                base_url=settings.OLLAMA_BASE_URL,
+                model=settings.OLLAMA_LLM_MODEL,
+                temperature=settings.LLM_TEMPERATURE,
+                streaming=settings.LLM_STREAMING
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize Ollama LLM: {e}")
+            if settings.ENABLE_FALLBACK and settings.LLM_FALLBACK_PROVIDER == "openai":
+                logger.info("Falling back to OpenAI LLM")
+                return get_llm(force_provider="openai")
+            raise
+    
+    if primary_provider == "openai":
+        if ChatOpenAI is None:
+            raise ValueError("ChatOpenAI is not available.")
+        logger.info(f"Using OpenAI LLM: {settings.OPENAI_MODEL}")
+        return ChatOpenAI(
+            model=settings.OPENAI_MODEL,
+            openai_api_key=settings.OPENAI_API_KEY,
+            temperature=settings.LLM_TEMPERATURE,
+            streaming=settings.LLM_STREAMING
+        )
+    
+    raise ValueError(f"Unknown LLM provider: {primary_provider}")
+
 # Helper to resolve Vector Store
 def get_vector_store():
     embeddings = get_embeddings()
@@ -181,10 +233,8 @@ def get_vector_store():
     if PGVector is None:
         raise ValueError("PGVector store is not initialized properly.")
     
-    # pgvector sync connection string or url
     conn_url = settings.DATABASE_SYNC_URL
     
-    # In langchain-postgres, the connection can be string
     return PGVector(
         embeddings=embeddings,
         collection_name="clinical_docs_collection",
@@ -212,18 +262,14 @@ def parse_pdf(file_path: str) -> Tuple[List[str], int]:
                 if tables:
                     formatted_tables = []
                     for table in tables:
-                        # Format as markdown table
                         markdown_rows = []
                         for row in table:
-                            # Clean up cells
                             clean_row = [str(cell or "").replace("\n", " ").strip() for cell in row]
-                            # If row is empty, skip
                             if not any(clean_row):
                                 continue
                             markdown_rows.append("| " + " | ".join(clean_row) + " |")
                         
                         if markdown_rows:
-                            # Insert markdown separator below header row
                             num_cols = len(table[0]) if table else 0
                             if num_cols > 0:
                                 sep = "| " + " | ".join(["---"] * num_cols) + " |"
@@ -287,19 +333,13 @@ async def ingest_document_async(document_id: str, experiment_id: str, file_path:
             chunks = await asyncio.to_thread(text_splitter.split_documents, documents)
             logger.info(f"Split PDF into {len(chunks)} chunks.")
             
-            # Add to PGVector
+            # Add to vector store
             vector_store = get_vector_store()
             
-            # LangChain PGVector expects list of documents
-            # In langchain_postgres, we add documents using add_documents
             if chunks:
-                # We can write embeddings in batches to prevent API rate limits
-                batch_size = 100
+                batch_size = settings.EMBEDDING_BATCH_SIZE
                 for i in range(0, len(chunks), batch_size):
                     batch = chunks[i : i + batch_size]
-                    # PGVector expects sync/async add documents. Let's run it.
-                    # Since langchain_postgres PGVector is synchronous in some functions, we can call it in a run_in_executor or simple call.
-                    # Wait, let's call add_documents which handles it sync.
                     await asyncio.to_thread(vector_store.add_documents, batch)
             
             # Update status to ready and update page count
@@ -320,19 +360,16 @@ async def ingest_document_async(document_id: str, experiment_id: str, file_path:
             )
             await db.commit()
 
-# Reranking helper
+# Reranking helper using CrossEncoder
 def rerank_documents(query: str, documents: List[LCDocument], top_n: int = 5) -> List[LCDocument]:
     if not reranker_model or not documents:
         return documents[:top_n]
     
-    # Prepare pairs for cross-encoder evaluation
     pairs = [[query, doc.page_content] for doc in documents]
     scores = reranker_model.predict(pairs)
     
-    # Sort documents by score descending
     scored_docs = sorted(zip(scores, documents), key=lambda x: x[0], reverse=True)
     
-    # Return top N
     return [doc for score, doc in scored_docs[:top_n]]
 
 # Retrieve contexts from vector store with metadata filtering
@@ -340,15 +377,12 @@ def retrieve_contexts(query: str, experiment_ids: List[str], top_k: int = 15, to
     vector_store = get_vector_store()
     
     all_retrieved = []
-    # Query per experiment to avoid retrieval imbalance
-    # This addresses the "Retrieval Interference" research point by querying each selected experiment's namespace
     for exp_id in experiment_ids:
-        # LangChain PGVector uses 'filter' for metadata filtering
         filter_dict = {"experiment_id": str(exp_id)}
         results = vector_store.similarity_search(query, k=top_k, filter=filter_dict)
         all_retrieved.extend(results)
     
-    # De-duplicate results by content (or by id/metadata combo)
+    # De-duplicate results
     seen = set()
     unique_retrieved = []
     for doc in all_retrieved:

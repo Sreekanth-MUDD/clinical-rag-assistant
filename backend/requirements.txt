@@ -11,6 +11,7 @@ pdfplumber
 langchain
 langchain-community
 langchain-openai
+langchain-ollama
 langchain-postgres
 python-jose[cryptography]
 passlib[bcrypt]
