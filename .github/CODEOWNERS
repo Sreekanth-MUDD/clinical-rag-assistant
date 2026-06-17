@@ -1,0 +1,12 @@
+# CODEOWNERS file for clinical-rag-assistant
+
+# Default owners for all files in the repo
+* @Sreekanth-MUDD
+
+# Backend owners
+/backend/ @Sreekanth-MUDD
+/backend/app/ @Sreekanth-MUDD
+/backend/tests/ @Sreekanth-MUDD
+
+# Frontend owners (if applicable)
+/frontend/ @Sreekanth-MUDD

@@ -1,0 +1,44 @@
+name: PR Status Check
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+jobs:
+  pr-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check PR title
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          echo "PR Title: $PR_TITLE"
+          if [ -z "$PR_TITLE" ]; then
+            echo "❌ PR title cannot be empty"
+            exit 1
+          else
+            echo "✅ PR title is present"
+          fi
+
+      - name: Check PR description
+        run: |
+          PR_BODY="${{ github.event.pull_request.body }}"
+          if [ -z "$PR_BODY" ] || [ "${#PR_BODY}" -lt 10 ]; then
+            echo "⚠️ Warning: PR description is too short or empty"
+          else
+            echo "✅ PR description is adequate"
+          fi
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: "🔍 PR validation checks completed. Please review the logs for details."
+            })

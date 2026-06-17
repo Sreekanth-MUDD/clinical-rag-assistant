@@ -1,0 +1,64 @@
+name: CD Pipeline - Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get commit info
+        id: commit
+        run: |
+          echo "commit_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "commit_message=$(git log -1 --pretty=%B)" >> $GITHUB_OUTPUT
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run final verification tests
+        run: |
+          pip install pytest pytest-cov
+          pytest backend/tests/ -v --tb=short
+
+      - name: Build Docker image (if Dockerfile exists)
+        run: |
+          if [ -f Dockerfile ]; then
+            docker build -t clinical-rag-assistant:${{ steps.commit.outputs.commit_sha }} .
+          else
+            echo "No Dockerfile found, skipping Docker build"
+          fi
+        continue-on-error: true
+
+      - name: Deployment notification
+        run: |
+          echo "🚀 Deployment initiated for commit: ${{ steps.commit.outputs.commit_sha }}"
+          echo "📝 Commit message: ${{ steps.commit.outputs.commit_message }}"
+          echo "✅ All checks passed"
+          echo "Ready for production deployment"
+
+      - name: Create deployment status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: context.payload.deployment?.id || 0,
+              state: 'success',
+              description: 'Ready for deployment',
+              environment_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            })
+        continue-on-error: true
