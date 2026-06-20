@@ -3,16 +3,12 @@ uvicorn
 pydantic
 pydantic-settings
 sqlalchemy
-asyncpg
-psycopg[binary]
 aiosqlite
 pypdf
 pdfplumber
 langchain
 langchain-community
-langchain-openai
 langchain-ollama
-langchain-postgres
 python-jose[cryptography]
 passlib[bcrypt]
 bcrypt
@@ -20,3 +16,15 @@ python-multipart
 sse-starlette
 sentence-transformers
 numpy
+faiss-cpu
+
+# Development and testing dependencies (unpinned to avoid conflicts)
+pytest
+pytest-cov
+pytest-asyncio
+pylint
+black
+flake8
+mypy
+isort
+coverage

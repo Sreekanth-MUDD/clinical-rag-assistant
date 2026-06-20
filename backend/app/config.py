@@ -2,27 +2,23 @@ import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql+asyncpg://sanofi_admin:sanofi_secure_pass123@localhost:5432/rag_clinical_db"
-    DATABASE_SYNC_URL: str = "postgresql+psycopg://sanofi_admin:sanofi_secure_pass123@localhost:5432/rag_clinical_db"
+    # Use SQLite only for simplicity and reliability
+    DATABASE_URL: str = "sqlite+aiosqlite:///./data/local_rag.db"
     
     # LLM Provider Configuration
-    LLM_PROVIDER: str = "ollama"  # "ollama" or "openai"
-    LLM_FALLBACK_PROVIDER: str = "openai"  # Fallback provider
-    ENABLE_FALLBACK: bool = True  # Enable automatic fallback to OpenAI on errors
-    
-    # OpenAI Configuration (for fallback)
-    OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4o"
+    LLM_PROVIDER: str = "ollama"
     
     # Ollama Configuration
     OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_LLM_MODEL: str = "mistral"  # Optimized for medium memory (7B parameters)
-    OLLAMA_EMBEDDING_MODEL: str = "nomic-embed-text"  # Lightweight, high-quality embeddings
+    OLLAMA_LLM_MODEL: str = "llama3"  # Default Ollama LLM model
     
     # Embedding Configuration
-    EMBEDDING_PROVIDER: str = "bge"  # "bge" for sentence-transformers, "ollama" for Ollama embeddings
-    BGE_MODEL_NAME: str = "BAAI/bge-small-en-v1.5"  # High-quality, low-latency BGE model
-    USE_BGE_EMBEDDING: bool = True  # Use BGE for better quality than Ollama embeddings
+    EMBEDDING_PROVIDER: str = "bge"  # Use BGE for faster embeddings
+    USE_BGE_EMBEDDING: bool = True  # Enable BGE embeddings for performance
+    BGE_MODEL_NAME: str = "BAAI/bge-small-en-v1.5"
+    
+    # Vector Store Configuration
+    VECTOR_STORE_TYPE: str = "faiss"  # Use FAISS for reliable vector storage
     
     # Authentication
     SECRET_KEY: str = "6c93f0b2f8a846c2bf1974de452932b17a0ef19e4871e8c07cb7f7ffb587a8b3"
@@ -31,11 +27,11 @@ class Settings(BaseSettings):
     
     # File Upload
     UPLOAD_DIR: str = "./data/uploads"
-    CHUNK_SIZE: int = 1000
-    CHUNK_OVERLAP: int = 200
+    CHUNK_SIZE: int = 2000  # Increased from 1000 to reduce number of chunks
+    CHUNK_OVERLAP: int = 400  # Increased from 200 to maintain context
     
     # Performance tuning
-    EMBEDDING_BATCH_SIZE: int = 32  # Batch size for embedding generation
+    EMBEDDING_BATCH_SIZE: int = 64  # Increased from 32 for faster processing
     LLM_TEMPERATURE: float = 0.2
     LLM_STREAMING: bool = True
 
