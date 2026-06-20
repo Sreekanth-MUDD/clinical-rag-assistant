@@ -19,27 +19,9 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     username: Optional[str] = None
 
-# Experiment Schemas
-class ExperimentCreate(BaseModel):
-    name: str = Field(..., min_length=1)
-    disease_area: str = Field(..., min_length=1)
-    model_type: str = Field(..., min_length=1)
-
-class ExperimentResponse(BaseModel):
-    id: str
-    name: str
-    disease_area: str
-    model_type: str
-    status: str
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
 # Document Schemas
 class DocumentResponse(BaseModel):
     id: str
-    experiment_id: str
     filename: str
     status: str
     page_count: int
@@ -51,7 +33,7 @@ class DocumentResponse(BaseModel):
 # Chat Schemas
 class ChatQueryRequest(BaseModel):
     query: str
-    experiment_ids: List[str]
+    document_id: str  # Single document for document-centric chat
     session_id: Optional[str] = None
 
 class ChatSource(BaseModel):
@@ -65,10 +47,16 @@ class ChatQueryResponse(BaseModel):
     answer: str
     sources: List[ChatSource]
 
-class CompareRequest(BaseModel):
-    query: str
-    experiment_ids: List[str]
+class ChatMessageResponse(BaseModel):
+    id: str
+    role: str
+    content: str
+    sources: Optional[List[ChatSource]] = None
+    created_at: datetime
 
-class CompareResponse(BaseModel):
-    comparison: str
-    sources: List[ChatSource]
+    class Config:
+        from_attributes = True
+
+class ChatHistoryResponse(BaseModel):
+    document_id: str
+    messages: List[ChatMessageResponse]

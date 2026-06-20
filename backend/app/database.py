@@ -6,27 +6,25 @@ from typing import AsyncGenerator
 from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, JSON
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
-from sqlalchemy import text
 from app.config import settings
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Global flag to signal vector store layer
-USE_POSTGRES = True
+# Use SQLite only for simplicity and reliability
+DATABASE_URL = "sqlite+aiosqlite:///./data/local_rag.db"
 
-# Setup database URLs
-DATABASE_URL = settings.DATABASE_URL
+# Ensure data directory exists
+os.makedirs("./data", exist_ok=True)
 
-# Create Async Engine (re-assignable globally)
+# Create Async Engine
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    future=True,
-    pool_pre_ping=True
+    future=True
 )
 
-# Async Session Factory (re-assignable globally)
+# Async Session Factory
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
@@ -44,30 +42,34 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
-class Experiment(Base):
-    __tablename__ = "experiments"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    name = Column(String, nullable=False)
-    disease_area = Column(String, nullable=False)
-    model_type = Column(String, nullable=False)
-    status = Column(String, default="completed")  # completed, processing, failed
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-
-    documents = relationship("Document", back_populates="experiment", cascade="all, delete-orphan")
+    documents = relationship("Document", back_populates="user", cascade="all, delete-orphan")
 
 class Document(Base):
     __tablename__ = "documents"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    experiment_id = Column(String, ForeignKey("experiments.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     filename = Column(String, nullable=False)
     file_path = Column(String, nullable=False)
     status = Column(String, default="pending")  # pending, processing, ready, error
     page_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
-    experiment = relationship("Experiment", back_populates="documents")
+    user = relationship("User", back_populates="documents")
+    chat_messages = relationship("ChatMessage", back_populates="document", cascade="all, delete-orphan")
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    document_id = Column(String, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role = Column(String, nullable=False)  # 'user' or 'assistant'
+    content = Column(String, nullable=False)
+    sources = Column(JSON, nullable=True)  # Store source citations as JSON
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    document = relationship("Document", back_populates="chat_messages")
 
 # Dependency to get session
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -81,38 +83,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         finally:
             await session.close()
 
-# Database initialization with automated SQLite fallback
+# Database initialization
 async def init_db():
-    global engine, AsyncSessionLocal, USE_POSTGRES
-    try:
-        async with engine.begin() as conn:
-            # Try PostgreSQL vector extension
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            # Create all tables
-            await conn.run_sync(Base.metadata.create_all)
-            logger.info("Connected to PostgreSQL/pgvector database successfully.")
-    except Exception as e:
-        logger.warning(f"Failed to connect to PostgreSQL: {e}. Falling back to SQLite local database.")
-        USE_POSTGRES = False
-        
-        # Ensure local database directory exists
-        db_dir = "./data"
-        os.makedirs(db_dir, exist_ok=True)
-        sqlite_url = "sqlite+aiosqlite:///./data/local_rag.db"
-        
-        # Recreate engine and session local globally for SQLite
-        engine = create_async_engine(
-            sqlite_url,
-            echo=False,
-            future=True
-        )
-        AsyncSessionLocal = async_sessionmaker(
-            bind=engine,
-            class_=AsyncSession,
-            expire_on_commit=False
-        )
-        
-        # Initialize tables on SQLite
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("Local SQLite database initialized successfully.")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("SQLite database initialized successfully.")

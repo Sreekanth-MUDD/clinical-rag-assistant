@@ -11,33 +11,21 @@ from sqlalchemy import update
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document as LCDocument
 from app.config import settings
-from app.database import Document as DBDocument, Experiment, AsyncSessionLocal, USE_POSTGRES
+from app.database import Document as DBDocument, AsyncSessionLocal
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Try importing langchain-postgres, fallback to langchain-community
+# Try importing FAISS for reliable vector storage
 try:
-    from langchain_postgres import PGVector
+    from langchain_community.vectorstores import FAISS
+    FAISS_AVAILABLE = True
 except ImportError:
-    try:
-        from langchain_community.vectorstores import PGVector
-    except ImportError:
-        PGVector = None
-        logger.warning("PGVector package not found! Please check requirements.txt.")
+    FAISS_AVAILABLE = False
+    logger.warning("FAISS package not found! Please install faiss-cpu.")
 
-# Try importing OpenAI embeddings/models
-try:
-    from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-except ImportError:
-    try:
-        from langchain_community.embeddings import OpenAIEmbeddings
-        from langchain_community.chat_models import ChatOpenAI
-    except ImportError:
-        OpenAIEmbeddings = None
-        ChatOpenAI = None
-        logger.warning("OpenAI packages not available. Fallback disabled.")
+# OpenAI configuration removed (Ollama-only mode)
 
 # Try importing Ollama embeddings/models
 try:
@@ -146,6 +134,11 @@ class InMemoryVectorStore:
             for item in top_k
         ]
 
+    def delete_document_embeddings(self, document_id: str):
+        self.chunks = [c for c in self.chunks if c["metadata"].get("document_id") != str(document_id)]
+        self._save_store()
+        logger.info(f"Deleted embeddings for document_id={document_id} from local json store.")
+
 class BGEEmbeddings:
     """Wrapper for BGE embeddings via sentence-transformers."""
     def __init__(self, model_name: str = settings.BGE_MODEL_NAME):
@@ -161,7 +154,7 @@ class BGEEmbeddings:
 
 # Helper to resolve Embeddings
 def get_embeddings():
-    """Get embeddings with priority: BGE > Ollama > OpenAI."""
+    """Get embeddings with priority: BGE > Ollama."""
     try:
         if settings.USE_BGE_EMBEDDING and settings.EMBEDDING_PROVIDER == "bge":
             logger.info(f"Using BGE embeddings: {settings.BGE_MODEL_NAME}")
@@ -169,78 +162,45 @@ def get_embeddings():
     except Exception as e:
         logger.warning(f"Failed to load BGE embeddings: {e}. Falling back to Ollama.")
     
-    if settings.LLM_PROVIDER == "ollama":
-        if OllamaEmbeddings is None:
-            raise ValueError("OllamaEmbeddings is not available.")
-        logger.info(f"Using Ollama embeddings: {settings.OLLAMA_EMBEDDING_MODEL}")
-        return OllamaEmbeddings(
-            base_url=settings.OLLAMA_BASE_URL,
-            model=settings.OLLAMA_EMBEDDING_MODEL
-        )
-    
-    if OpenAIEmbeddings is not None:
-        logger.info("Using OpenAI embeddings (fallback)")
-        return OpenAIEmbeddings(
-            model="text-embedding-3-small",
-            openai_api_key=settings.OPENAI_API_KEY
-        )
-    
-    raise ValueError("No embedding provider available!")
+    if OllamaEmbeddings is None:
+        raise ValueError("OllamaEmbeddings is not available.")
+    logger.info(f"Using Ollama embeddings: {settings.OLLAMA_EMBEDDING_MODEL}")
+    return OllamaEmbeddings(
+        base_url=settings.OLLAMA_BASE_URL,
+        model=settings.OLLAMA_EMBEDDING_MODEL
+    )
 
-# Helper to resolve LLM with fallback mechanism
-def get_llm(force_provider: Optional[str] = None) -> Any:
-    """Get LLM with automatic fallback mechanism."""
-    primary_provider = force_provider or settings.LLM_PROVIDER
-    
-    if primary_provider == "ollama":
-        try:
-            if ChatOllama is None:
-                raise ValueError("ChatOllama is not available.")
-            logger.info(f"Using Ollama LLM: {settings.OLLAMA_LLM_MODEL}")
-            return ChatOllama(
-                base_url=settings.OLLAMA_BASE_URL,
-                model=settings.OLLAMA_LLM_MODEL,
-                temperature=settings.LLM_TEMPERATURE,
-                streaming=settings.LLM_STREAMING
-            )
-        except Exception as e:
-            logger.warning(f"Failed to initialize Ollama LLM: {e}")
-            if settings.ENABLE_FALLBACK and settings.LLM_FALLBACK_PROVIDER == "openai":
-                logger.info("Falling back to OpenAI LLM")
-                return get_llm(force_provider="openai")
-            raise
-    
-    if primary_provider == "openai":
-        if ChatOpenAI is None:
-            raise ValueError("ChatOpenAI is not available.")
-        logger.info(f"Using OpenAI LLM: {settings.OPENAI_MODEL}")
-        return ChatOpenAI(
-            model=settings.OPENAI_MODEL,
-            openai_api_key=settings.OPENAI_API_KEY,
-            temperature=settings.LLM_TEMPERATURE,
-            streaming=settings.LLM_STREAMING
-        )
-    
-    raise ValueError(f"Unknown LLM provider: {primary_provider}")
+# Helper to resolve LLM
+def get_llm() -> Any:
+    """Get Ollama LLM."""
+    if ChatOllama is None:
+        raise ValueError("ChatOllama is not available.")
+    logger.info(f"Using Ollama LLM: {settings.OLLAMA_LLM_MODEL}")
+    return ChatOllama(
+        base_url=settings.OLLAMA_BASE_URL,
+        model=settings.OLLAMA_LLM_MODEL,
+        temperature=settings.LLM_TEMPERATURE,
+        streaming=settings.LLM_STREAMING
+    )
 
 # Helper to resolve Vector Store
 def get_vector_store():
     embeddings = get_embeddings()
-    if not USE_POSTGRES:
-        logger.info("Using InMemoryVectorStore fallback...")
+    
+    if not FAISS_AVAILABLE:
+        logger.warning("FAISS not available, using InMemoryVectorStore fallback...")
         return InMemoryVectorStore(embeddings)
-        
-    if PGVector is None:
-        raise ValueError("PGVector store is not initialized properly.")
     
-    conn_url = settings.DATABASE_SYNC_URL
+    # Use FAISS for reliable vector storage
+    faiss_index_path = "./data/faiss_index"
+    os.makedirs(os.path.dirname(faiss_index_path), exist_ok=True)
     
-    return PGVector(
-        embeddings=embeddings,
-        collection_name="clinical_docs_collection",
-        connection=conn_url,
-        use_jsonb=True
-    )
+    if os.path.exists(faiss_index_path):
+        logger.info("Loading existing FAISS index...")
+        return FAISS.load_local(faiss_index_path, embeddings, allow_dangerous_deserialization=True)
+    else:
+        logger.info("Creating new FAISS index...")
+        return FAISS.from_texts([""], embeddings)
 
 # PDF parser that combines text and pdfplumber tables
 def parse_pdf(file_path: str) -> Tuple[List[str], int]:
@@ -292,8 +252,8 @@ def parse_pdf(file_path: str) -> Tuple[List[str], int]:
     return final_pages, page_count
 
 # Async Ingestion Task
-async def ingest_document_async(document_id: str, experiment_id: str, file_path: str, filename: str):
-    logger.info(f"Ingestion started for document_id={document_id}, experiment_id={experiment_id}")
+async def ingest_document_async(document_id: str, file_path: str, filename: str):
+    logger.info(f"Ingestion started for document_id={document_id}")
     
     async with AsyncSessionLocal() as db:
         try:
@@ -306,7 +266,9 @@ async def ingest_document_async(document_id: str, experiment_id: str, file_path:
             await db.commit()
             
             # Parse PDF in thread pool
+            logger.info(f"Parsing PDF for document_id={document_id}")
             pages_content, page_count = await asyncio.to_thread(parse_pdf, file_path)
+            logger.info(f"Parsed {page_count} pages for document_id={document_id}")
             
             # Create LangChain Document objects
             documents = []
@@ -316,7 +278,6 @@ async def ingest_document_async(document_id: str, experiment_id: str, file_path:
                 doc = LCDocument(
                     page_content=page_text,
                     metadata={
-                        "experiment_id": str(experiment_id),
                         "document_id": str(document_id),
                         "filename": filename,
                         "page_number": idx + 1
@@ -325,22 +286,35 @@ async def ingest_document_async(document_id: str, experiment_id: str, file_path:
                 documents.append(doc)
             
             # Split documents into chunks
+            logger.info(f"Splitting documents into chunks for document_id={document_id}")
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=settings.CHUNK_SIZE,
                 chunk_overlap=settings.CHUNK_OVERLAP,
                 separators=["\n## ", "\n### ", "\n\n", "\n", ". ", " "]
             )
             chunks = await asyncio.to_thread(text_splitter.split_documents, documents)
-            logger.info(f"Split PDF into {len(chunks)} chunks.")
+            logger.info(f"Split PDF into {len(chunks)} chunks for document_id={document_id}")
             
-            # Add to vector store
+            # Add to vector store with progress tracking
+            logger.info(f"Starting embedding generation for {len(chunks)} chunks")
             vector_store = get_vector_store()
             
             if chunks:
                 batch_size = settings.EMBEDDING_BATCH_SIZE
+                total_batches = (len(chunks) + batch_size - 1) // batch_size
+                
                 for i in range(0, len(chunks), batch_size):
                     batch = chunks[i : i + batch_size]
+                    batch_num = (i // batch_size) + 1
+                    logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} chunks) for document_id={document_id}")
                     await asyncio.to_thread(vector_store.add_documents, batch)
+                    logger.info(f"Completed batch {batch_num}/{total_batches} for document_id={document_id}")
+                
+                # Save FAISS index after ingestion
+                if FAISS_AVAILABLE:
+                    faiss_index_path = "./data/faiss_index"
+                    await asyncio.to_thread(vector_store.save_local, faiss_index_path)
+                    logger.info(f"Saved FAISS index for document_id={document_id}")
             
             # Update status to ready and update page count
             await db.execute(
@@ -360,6 +334,19 @@ async def ingest_document_async(document_id: str, experiment_id: str, file_path:
             )
             await db.commit()
 
+# Async Embedding Deletion Task
+async def delete_document_embeddings_async(document_id: str):
+    """Delete document embeddings from the active vector store."""
+    if FAISS_AVAILABLE:
+        # For FAISS, we need to rebuild the index without the deleted document
+        # This is a limitation of FAISS - it doesn't support easy deletion
+        # For now, we'll just log and skip deletion
+        logger.warning(f"FAISS doesn't support easy deletion. Document {document_id} embeddings will remain in index.")
+    else:
+        vector_store = get_vector_store()
+        if isinstance(vector_store, InMemoryVectorStore):
+            vector_store.delete_document_embeddings(document_id)
+
 # Reranking helper using CrossEncoder
 def rerank_documents(query: str, documents: List[LCDocument], top_n: int = 5) -> List[LCDocument]:
     if not reranker_model or not documents:
@@ -373,14 +360,20 @@ def rerank_documents(query: str, documents: List[LCDocument], top_n: int = 5) ->
     return [doc for score, doc in scored_docs[:top_n]]
 
 # Retrieve contexts from vector store with metadata filtering
-def retrieve_contexts(query: str, experiment_ids: List[str], top_k: int = 15, top_n: int = 5) -> List[LCDocument]:
+def retrieve_contexts(query: str, document_ids: List[str] = None, top_k: int = 15, top_n: int = 5) -> List[LCDocument]:
     vector_store = get_vector_store()
     
-    all_retrieved = []
-    for exp_id in experiment_ids:
-        filter_dict = {"experiment_id": str(exp_id)}
-        results = vector_store.similarity_search(query, k=top_k, filter=filter_dict)
-        all_retrieved.extend(results)
+    if not document_ids:
+        # Search across all documents if none are selected
+        logger.info("Retrieving contexts scoped to all documents")
+        all_retrieved = vector_store.similarity_search(query, k=top_k)
+    else:
+        logger.info(f"Retrieving contexts scoped to documents: {document_ids}")
+        all_retrieved = []
+        for doc_id in document_ids:
+            filter_dict = {"document_id": str(doc_id)}
+            results = vector_store.similarity_search(query, k=top_k, filter=filter_dict)
+            all_retrieved.extend(results)
     
     # De-duplicate results
     seen = set()
