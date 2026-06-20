@@ -7,11 +7,44 @@ services:
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_USER: sanofi_admin
-      POSTGRES_PASSWORD: sanofi_secure_pass123
+      POSTGRES_USER: rag_admin
+      POSTGRES_PASSWORD: rag_secure_pass123
       POSTGRES_DB: rag_clinical_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rag_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/data:/app/data
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://rag_admin:rag_secure_pass123@db:5432/rag_clinical_db
+      - DATABASE_SYNC_URL=postgresql+psycopg://rag_admin:rag_secure_pass123@db:5432/rag_clinical_db
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - LLM_PROVIDER=ollama
+      - OLLAMA_LLM_MODEL=llama3
+      - OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+    depends_on:
+      - db
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rag_frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
     restart: always
 
 volumes:

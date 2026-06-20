@@ -1,14 +1,16 @@
 /* -------------------------------------------------------------
-   Sanofi RCG Scientific Assistant Javascript Main Core
-   Handles: Auth, Experiment CRUD, Document Uploads, SSE Streaming
+   Clinical RCG Scientific Assistant Javascript Main Core
+   Handles: Auth, Document Management, Document-centric Chat, SSE Streaming
    ------------------------------------------------------------- */
 
-const API_BASE = "http://localhost:8000/api";
+// Determine API base dynamically to support both Docker compose (with Nginx proxy) and local dev
+const API_BASE = (window.location.port === "3000" && !window.location.pathname.startsWith('/api') && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"))
+  ? "http://localhost:8000/api"
+  : "/api";
 let currentToken = localStorage.getItem("token") || null;
 let currentUsername = localStorage.getItem("username") || null;
-let selectedExperiments = new Set();
-let allExperiments = [];
-let activeUploadExpId = null;
+let activeDocumentId = null;
+let allDocuments = [];
 
 // Toast Alerts
 function showToast(message, duration = 3000) {
@@ -31,7 +33,7 @@ function checkAuth() {
         authContainer.classList.add("hidden");
         appContainer.classList.remove("hidden");
         userDisplay.textContent = currentUsername;
-        loadExperiments();
+        loadDocuments();
     } else {
         authContainer.classList.remove("hidden");
         appContainer.classList.add("hidden");
@@ -106,213 +108,179 @@ function handleLogout() {
     currentUsername = null;
     localStorage.removeItem("token");
     localStorage.removeItem("username");
-    selectedExperiments.clear();
-    updateScopeSelectionUI();
+    activeDocumentId = null;
+    allDocuments = [];
+    updateActiveDocumentUI();
     showToast("Logged out successfully");
     checkAuth();
 }
 
 // -------------------------------------------------------------
-// Experiment Run management
+// Document Management
 // -------------------------------------------------------------
-async function loadExperiments() {
+async function loadDocuments() {
     try {
-        const response = await fetch(`${API_BASE}/experiments`, {
+        const response = await fetch(`${API_BASE}/documents`, {
             headers: { "Authorization": `Bearer ${currentToken}` }
         });
 
-        if (!response.ok) throw new Error("Failed to load experiments");
+        if (!response.ok) throw new Error("Failed to load documents");
 
-        allExperiments = await response.json();
-        renderExperimentsTable(allExperiments);
+        allDocuments = await response.json();
+        renderDocumentsTable(allDocuments);
     } catch (err) {
         showToast(err.message);
     }
 }
 
-function renderExperimentsTable(experiments) {
-    const tbody = document.getElementById("experiments-tbody");
+function renderDocumentsTable(documents) {
+    const tbody = document.getElementById("documents-tbody");
     tbody.innerHTML = "";
 
-    if (experiments.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--color-text-muted);">No RCG experiments found. Create one to get started.</td></tr>`;
+    if (documents.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--color-text-muted);">No documents found. Upload one to get started.</td></tr>`;
         return;
     }
 
-    experiments.forEach(exp => {
-        const isChecked = selectedExperiments.has(exp.id) ? "checked" : "";
-        const formattedDate = new Date(exp.created_at).toLocaleDateString(undefined, {
+    documents.forEach(doc => {
+        const formattedDate = new Date(doc.created_at).toLocaleDateString(undefined, {
             year: 'numeric', month: 'short', day: 'numeric'
         });
 
         const tr = document.createElement("tr");
         tr.innerHTML = `
-            <td><input type="checkbox" class="exp-checkbox" data-id="${exp.id}" ${isChecked}></td>
-            <td style="font-weight: 500;">${exp.name}</td>
-            <td>${exp.disease_area}</td>
-            <td style="font-size: 0.85rem; color: var(--color-text-secondary);">${exp.model_type}</td>
-            <td><span class="badge-status completed">${exp.status}</span></td>
+            <td style="font-weight: 500;">${doc.filename}</td>
+            <td><span class="badge-status ${doc.status}">${doc.status}</span></td>
+            <td>${doc.page_count}</td>
             <td>${formattedDate}</td>
             <td class="action-links">
-                <a class="manage-docs-btn" data-id="${exp.id}" data-name="${exp.name}">Docs / Ingestion</a>
+                <a class="chat-doc-btn" data-id="${doc.id}" data-name="${doc.filename}" data-status="${doc.status}">Chat</a>
+                <a class="delete-doc-btn" data-id="${doc.id}">Delete</a>
             </td>
         `;
         tbody.appendChild(tr);
     });
 
-    // Add event listeners to checkboxes
-    document.querySelectorAll(".exp-checkbox").forEach(chk => {
-        chk.addEventListener("change", (e) => {
-            const expId = e.target.getAttribute("data-id");
-            if (e.target.checked) {
-                selectedExperiments.add(expId);
-            } else {
-                selectedExperiments.delete(expId);
-            }
-            updateScopeSelectionUI();
-        });
-    });
-
-    // Add event listeners to manage docs links
-    document.querySelectorAll(".manage-docs-btn").forEach(link => {
+    // Add event listeners to chat buttons
+    document.querySelectorAll(".chat-doc-btn").forEach(link => {
         link.addEventListener("click", (e) => {
             const id = e.target.getAttribute("data-id");
             const name = e.target.getAttribute("data-name");
-            openDocsModal(id, name);
+            const status = e.target.getAttribute("data-status");
+            openDocumentChat(id, name, status);
+        });
+    });
+
+    // Add event listeners to delete buttons
+    document.querySelectorAll(".delete-doc-btn").forEach(link => {
+        link.addEventListener("click", (e) => {
+            const id = e.target.getAttribute("data-id");
+            deleteDocument(id);
         });
     });
 }
 
-function updateScopeSelectionUI() {
-    const selectedCount = selectedExperiments.size;
-    const placeholder = document.getElementById("selected-list-placeholder");
-    const chipsContainer = document.getElementById("selected-experiments-chips");
+function updateActiveDocumentUI() {
+    const placeholder = document.getElementById("active-doc-placeholder");
+    const chipsContainer = document.getElementById("active-doc-chip");
     const chatTrigger = document.getElementById("btn-chat-trigger");
     const chatScopedSub = document.getElementById("chat-scoped-sub");
-    
-    // Scoped Sub display
-    chatScopedSub.textContent = `Scoped: ${selectedCount} experiment(s)`;
+    const chatInput = document.getElementById("chat-input");
+    const sendBtn = document.getElementById("btn-send-chat");
 
-    if (selectedCount === 0) {
+    if (!activeDocumentId) {
         placeholder.classList.remove("hidden");
         chipsContainer.classList.add("hidden");
         chatTrigger.classList.add("hidden");
         document.getElementById("chat-sidebar").classList.remove("open");
+        chatScopedSub.textContent = "Document: None selected";
+        chatInput.disabled = true;
+        sendBtn.disabled = true;
     } else {
-        placeholder.classList.add("hidden");
-        chipsContainer.classList.remove("hidden");
-        chatTrigger.classList.remove("hidden");
-        
-        chipsContainer.innerHTML = "";
-        selectedExperiments.forEach(id => {
-            const exp = allExperiments.find(e => e.id === id);
-            if (exp) {
-                const chip = document.createElement("div");
-                chip.className = "chip animate-fade";
-                chip.innerHTML = `
-                    <span>${exp.name}</span>
-                    <span class="remove-chip" data-id="${id}">&times;</span>
-                `;
-                chipsContainer.appendChild(chip);
-            }
-        });
+        const doc = allDocuments.find(d => d.id === activeDocumentId);
+        if (doc) {
+            placeholder.classList.add("hidden");
+            chipsContainer.classList.remove("hidden");
+            chatTrigger.classList.remove("hidden");
+            chatScopedSub.textContent = `Document: ${doc.filename}`;
+            
+            chipsContainer.innerHTML = `
+                <div class="chip animate-fade">
+                    <span>${doc.filename}</span>
+                    <span class="remove-chip" data-id="${doc.id}">&times;</span>
+                </div>
+            `;
 
-        // Add remove click event
-        document.querySelectorAll(".remove-chip").forEach(removeBtn => {
-            removeBtn.addEventListener("click", (e) => {
-                const id = e.target.getAttribute("data-id");
-                selectedExperiments.delete(id);
-                // Uncheck in table
-                const checkbox = document.querySelector(`.exp-checkbox[data-id="${id}"]`);
-                if (checkbox) checkbox.checked = false;
-                
-                updateScopeSelectionUI();
+            // Enable chat if document is ready
+            if (doc.status === "ready") {
+                chatInput.disabled = false;
+                sendBtn.disabled = false;
+                chatInput.placeholder = "Ask a question about this document...";
+            } else {
+                chatInput.disabled = true;
+                sendBtn.disabled = true;
+                chatInput.placeholder = "Document is being processed...";
+            }
+
+            // Add remove click event
+            document.querySelectorAll(".remove-chip").forEach(removeBtn => {
+                removeBtn.addEventListener("click", (e) => {
+                    const id = e.target.getAttribute("data-id");
+                    activeDocumentId = null;
+                    updateActiveDocumentUI();
+                });
             });
-        });
+        }
     }
 }
 
-async function handleCreateExperiment(e) {
-    e.preventDefault();
-    const name = document.getElementById("exp-name").value;
-    const disease = document.getElementById("exp-disease").value;
-    const modelType = document.getElementById("exp-model-type").value;
+async function deleteDocument(documentId) {
+    if (!confirm("Are you sure you want to delete this document?")) return;
 
     try {
-        const response = await fetch(`${API_BASE}/experiments`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${currentToken}`
-            },
-            body: JSON.stringify({ name, disease_area: disease, model_type: modelType })
+        const response = await fetch(`${API_BASE}/documents/${documentId}`, {
+            method: "DELETE",
+            headers: { "Authorization": `Bearer ${currentToken}` }
         });
 
-        if (!response.ok) throw new Error("Failed to create experiment");
+        if (!response.ok) throw new Error("Failed to delete document");
 
-        showToast("Experiment run created!");
-        document.getElementById("new-experiment-modal").classList.add("hidden");
-        document.getElementById("new-experiment-form").reset();
-        loadExperiments();
+        showToast("Document deleted successfully");
+        if (activeDocumentId === documentId) {
+            activeDocumentId = null;
+            updateActiveDocumentUI();
+        }
+        loadDocuments();
     } catch (err) {
         showToast(err.message);
     }
 }
 
 // -------------------------------------------------------------
-// Documents / Ingestion
+// Document Upload
 // -------------------------------------------------------------
-async function openDocsModal(experimentId, experimentName) {
-    activeUploadExpId = experimentId;
-    document.getElementById("docs-modal-title").textContent = `Clinical Documents: ${experimentName}`;
-    document.getElementById("docs-modal").classList.remove("hidden");
-    loadDocuments(experimentId);
-}
-
-async function loadDocuments(experimentId) {
-    const docList = document.getElementById("docs-scroll-list");
-    docList.innerHTML = `<p style="text-align: center; color: var(--color-text-muted); padding: 20px;">Fetching documents...</p>`;
+async function uploadFile(file) {
+    const formData = new FormData();
+    formData.append("file", file);
 
     try {
-        const response = await fetch(`${API_BASE}/experiments/${experimentId}/documents`, {
-            headers: { "Authorization": `Bearer ${currentToken}` }
+        const response = await fetch(`${API_BASE}/documents/upload`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${currentToken}` },
+            body: formData
         });
 
-        if (!response.ok) throw new Error("Failed to fetch documents");
-
-        const documents = await response.json();
-        renderDocumentsList(documents);
-    } catch (err) {
-        docList.innerHTML = `<p style="text-align: center; color: var(--status-error); padding: 20px;">${err.message}</p>`;
-    }
-}
-
-function renderDocumentsList(documents) {
-    const docList = document.getElementById("docs-scroll-list");
-    docList.innerHTML = "";
-
-    if (documents.length === 0) {
-        docList.innerHTML = `<p style="text-align: center; color: var(--color-text-muted); padding: 20px;">No documents uploaded to this experiment yet.</p>`;
-        return;
-    }
-
-    documents.forEach(doc => {
-        const item = document.createElement("div");
-        item.className = "doc-list-item";
-        item.innerHTML = `
-            <div class="doc-info">
-                <span class="doc-name">${doc.filename}</span>
-                <span class="doc-meta">Pages: ${doc.page_count} | Uploaded: ${new Date(doc.created_at).toLocaleDateString()}</span>
-            </div>
-            <span class="badge-status ${doc.status}" id="doc-status-${doc.id}">${doc.status}</span>
-        `;
-        docList.appendChild(item);
-
-        // If processing or pending, poll status
-        if (doc.status === "pending" || doc.status === "processing") {
-            pollDocumentStatus(doc.id);
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.detail || "Upload failed");
         }
-    });
+
+        showToast("PDF uploaded! Ingestion pipeline started.");
+        document.getElementById("upload-doc-modal").classList.add("hidden");
+        loadDocuments();
+    } catch (err) {
+        showToast(err.message);
+    }
 }
 
 function pollDocumentStatus(docId) {
@@ -324,18 +292,22 @@ function pollDocumentStatus(docId) {
             if (!response.ok) return;
 
             const data = await response.json();
-            const badge = document.getElementById(`doc-status-${docId}`);
-            if (badge) {
-                badge.className = `badge-status ${data.status}`;
-                badge.textContent = data.status;
+            
+            // Update document in allDocuments array
+            const docIndex = allDocuments.findIndex(d => d.id === docId);
+            if (docIndex !== -1) {
+                allDocuments[docIndex].status = data.status;
+                allDocuments[docIndex].page_count = data.page_count;
+                renderDocumentsTable(allDocuments);
+            }
+
+            // Update active document UI if this is the active document
+            if (activeDocumentId === docId) {
+                updateActiveDocumentUI();
             }
 
             if (data.status === "ready" || data.status === "error") {
                 clearInterval(interval);
-                // Reload list to get updated page count
-                if (activeUploadExpId) {
-                    loadDocuments(activeUploadExpId);
-                }
             }
         } catch (e) {
             console.error("Polling error", e);
@@ -344,36 +316,83 @@ function pollDocumentStatus(docId) {
     }, 2000);
 }
 
-async function uploadFile(file) {
-    if (!activeUploadExpId) return;
+// -------------------------------------------------------------
+// Document Chat Interface
+// -------------------------------------------------------------
+async function openDocumentChat(documentId, documentName, status) {
+    activeDocumentId = documentId;
+    updateActiveDocumentUI();
+    
+    const chatSidebar = document.getElementById("chat-sidebar");
+    chatSidebar.classList.add("open");
+    
+    // Update chat scope info
+    const chatScopeInfo = document.getElementById("chat-scope-info");
+    chatScopeInfo.innerHTML = `
+        <div class="chip animate-fade">
+            <span>${documentName}</span>
+        </div>
+    `;
 
-    const formData = new FormData();
-    formData.append("file", file);
+    // Clear and reload chat messages
+    const chatMessages = document.getElementById("chat-messages");
+    chatMessages.innerHTML = "";
 
-    const docList = document.getElementById("docs-scroll-list");
-    const progressMsg = document.createElement("div");
-    progressMsg.style.padding = "10px";
-    progressMsg.style.color = "var(--accent-purple)";
-    progressMsg.textContent = "Uploading PDF clinical document...";
-    docList.prepend(progressMsg);
+    if (status === "ready") {
+        // Load chat history
+        await loadChatHistory(documentId);
+    } else {
+        chatMessages.innerHTML = `
+            <div class="message assistant-message glass-message">
+                <p>Document is being processed. Please wait until the status changes to "ready" before asking questions.</p>
+            </div>
+        `;
+    }
+}
 
+async function loadChatHistory(documentId) {
+    const chatMessages = document.getElementById("chat-messages");
+    
     try {
-        const response = await fetch(`${API_BASE}/experiments/${activeUploadExpId}/upload`, {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${currentToken}` },
-            body: formData
+        const response = await fetch(`${API_BASE}/documents/${documentId}/chat-history`, {
+            headers: { "Authorization": `Bearer ${currentToken}` }
         });
 
-        if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.detail || "Upload failed");
-        }
+        if (!response.ok) throw new Error("Failed to load chat history");
 
-        showToast("PDF Uploaded! Ingestion pipeline started.");
-        loadDocuments(activeUploadExpId);
+        const data = await response.json();
+        
+        if (data.messages.length === 0) {
+            chatMessages.innerHTML = `
+                <div class="message assistant-message glass-message">
+                    <p>Hello! I am your RCG Scientific Assistant. I have indexed this document.</p>
+                    <p>Ask me anything regarding the content, results, demographics, endpoints, or any other information from this document.</p>
+                </div>
+            `;
+        } else {
+            data.messages.forEach(msg => {
+                const className = msg.role === "user" ? "user-message" : "assistant-message";
+                const msgDiv = document.createElement("div");
+                msgDiv.className = `message ${className} animate-fade`;
+                
+                if (msg.role === "assistant") {
+                    msgDiv.innerHTML = `<p>${formatMessageContent(msg.content)}</p>`;
+                } else {
+                    msgDiv.innerHTML = `<p>${msg.content}</p>`;
+                }
+                
+                chatMessages.appendChild(msgDiv);
+            });
+            scrollChatToBottom();
+        }
     } catch (err) {
-        showToast(err.message);
-        loadDocuments(activeUploadExpId);
+        console.error("Error loading chat history:", err);
+        chatMessages.innerHTML = `
+            <div class="message assistant-message glass-message">
+                <p>Hello! I am your RCG Scientific Assistant. I have indexed this document.</p>
+                <p>Ask me anything regarding the content, results, demographics, endpoints, or any other information from this document.</p>
+            </div>
+        `;
     }
 }
 
@@ -384,7 +403,7 @@ async function handleSendChat(e) {
     e.preventDefault();
     const chatInput = document.getElementById("chat-input");
     const queryText = chatInput.value.trim();
-    if (!queryText || selectedExperiments.size === 0) return;
+    if (!queryText || !activeDocumentId) return;
 
     chatInput.value = "";
     
@@ -393,7 +412,7 @@ async function handleSendChat(e) {
     
     // Render Assistant Message Placeholder
     const assistantMsgElement = appendMessage("", "assistant-message");
-    assistantMsgElement.innerHTML = `<p class="typing-indicator">Analyzing context documents...</p>`;
+    assistantMsgElement.innerHTML = `<p class="typing-indicator">Analyzing document...</p>`;
     
     // Clear sources carousel
     const sourcesPreview = document.getElementById("sources-preview");
@@ -410,7 +429,7 @@ async function handleSendChat(e) {
             },
             body: JSON.stringify({
                 query: queryText,
-                experiment_ids: Array.from(selectedExperiments)
+                document_id: activeDocumentId
             })
         });
 
@@ -424,6 +443,7 @@ async function handleSendChat(e) {
         const decoder = new TextDecoder();
         let buffer = "";
         let finalAnswer = "";
+        let currentEvent = "";
         
         assistantMsgElement.innerHTML = ""; // Remove typing indicator
 
@@ -545,21 +565,12 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("login-form").addEventListener("submit", handleLogin);
     document.getElementById("register-form").addEventListener("submit", handleRegister);
     document.getElementById("btn-logout").addEventListener("click", handleLogout);
-    document.getElementById("new-experiment-form").addEventListener("submit", handleCreateExperiment);
     document.getElementById("chat-form").addEventListener("submit", handleSendChat);
 
-    // Modals control
-    const expModal = document.getElementById("new-experiment-modal");
-    document.getElementById("btn-new-exp-modal").addEventListener("click", () => expModal.classList.remove("hidden"));
-    document.getElementById("btn-close-modal").addEventListener("click", () => expModal.classList.add("hidden"));
-    document.getElementById("btn-cancel-modal").addEventListener("click", () => expModal.classList.add("hidden"));
-
-    const docsModal = document.getElementById("docs-modal");
-    document.getElementById("btn-close-docs-modal").addEventListener("click", () => {
-        docsModal.classList.add("hidden");
-        activeUploadExpId = null;
-        loadExperiments(); // Reload to refresh table statuses if changed
-    });
+    // Document Upload Modal
+    const uploadModal = document.getElementById("upload-doc-modal");
+    document.getElementById("btn-upload-doc-modal").addEventListener("click", () => uploadModal.classList.remove("hidden"));
+    document.getElementById("btn-close-upload-modal").addEventListener("click", () => uploadModal.classList.add("hidden"));
 
     // Sidebar Chat drawer
     const chatSidebar = document.getElementById("chat-sidebar");
@@ -592,29 +603,12 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Check All Checkbox
-    document.getElementById("check-all-experiments").addEventListener("change", (e) => {
-        const checkboxes = document.querySelectorAll(".exp-checkbox");
-        checkboxes.forEach(chk => {
-            chk.checked = e.target.checked;
-            const id = chk.getAttribute("data-id");
-            if (e.target.checked) {
-                selectedExperiments.add(id);
-            } else {
-                selectedExperiments.delete(id);
-            }
-        });
-        updateScopeSelectionUI();
-    });
-
     // Search filter
-    document.getElementById("experiment-search").addEventListener("input", (e) => {
+    document.getElementById("document-search").addEventListener("input", (e) => {
         const query = e.target.value.toLowerCase().trim();
-        const filtered = allExperiments.filter(exp => 
-            exp.name.toLowerCase().includes(query) || 
-            exp.disease_area.toLowerCase().includes(query) ||
-            exp.model_type.toLowerCase().includes(query)
+        const filtered = allDocuments.filter(doc => 
+            doc.filename.toLowerCase().includes(query)
         );
-        renderExperimentsTable(filtered);
+        renderDocumentsTable(filtered);
     });
 });
