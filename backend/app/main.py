@@ -10,11 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from app.config import settings
-from app.database import get_db, init_db, User, Experiment, Document as DBDocument
+from app.database import get_db, init_db, User, Document as DBDocument, ChatMessage
 from app.auth import get_password_hash, verify_password, create_access_token, get_current_user
-from app.schemas import UserCreate, UserLogin, Token, ExperimentCreate, ExperimentResponse, DocumentResponse, ChatQueryRequest
-from app.services import ingest_document_async, retrieve_contexts, get_llm
+from app.schemas import UserCreate, UserLogin, Token, DocumentResponse, ChatQueryRequest, ChatMessageResponse, ChatHistoryResponse
+from app.services import ingest_document_async, retrieve_contexts, get_llm, delete_document_embeddings_async
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -80,62 +79,27 @@ async def login(user_in: UserLogin, db: AsyncSession = Depends(get_db)):
         "username": user.username
     }
 
-# Experiment Routes
-@app.get("/api/experiments", response_model=List[ExperimentResponse])
-async def list_experiments(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    result = await db.execute(select(Experiment).order_by(Experiment.created_at.desc()))
-    experiments = result.scalars().all()
-    return experiments
-
-@app.post("/api/experiments", response_model=ExperimentResponse, status_code=status.HTTP_201_CREATED)
-async def create_experiment(
-    experiment_in: ExperimentCreate,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    new_experiment = Experiment(
-        name=experiment_in.name,
-        disease_area=experiment_in.disease_area,
-        model_type=experiment_in.model_type,
-        status="completed"
-    )
-    db.add(new_experiment)
-    await db.commit()
-    await db.refresh(new_experiment)
-    return new_experiment
-
-@app.get("/api/experiments/{experiment_id}/documents", response_model=List[DocumentResponse])
-async def list_experiment_documents(
-    experiment_id: str,
+# Document Routes
+@app.get("/api/documents", response_model=List[DocumentResponse])
+async def list_documents(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(
         select(DBDocument)
-        .where(DBDocument.experiment_id == experiment_id)
+        .where(DBDocument.user_id == current_user.id)
         .order_by(DBDocument.created_at.desc())
     )
     documents = result.scalars().all()
     return documents
 
-# Document Upload Routes
-@app.post("/api/experiments/{experiment_id}/upload", response_model=DocumentResponse)
+@app.post("/api/documents/upload", response_model=DocumentResponse)
 async def upload_document(
-    experiment_id: str,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    # Verify experiment exists
-    exp_result = await db.execute(select(Experiment).where(Experiment.id == experiment_id))
-    experiment = exp_result.scalars().first()
-    if not experiment:
-        raise HTTPException(status_code=404, detail="Experiment not found")
-        
     if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF documents are supported for now.")
 
@@ -156,7 +120,7 @@ async def upload_document(
     # Create document record
     doc_record = DBDocument(
         id=file_id,
-        experiment_id=experiment_id,
+        user_id=current_user.id,
         filename=file.filename,
         file_path=file_path,
         status="pending",
@@ -170,12 +134,46 @@ async def upload_document(
     background_tasks.add_task(
         ingest_document_async,
         document_id=file_id,
-        experiment_id=experiment_id,
         file_path=file_path,
         filename=file.filename
     )
 
     return doc_record
+
+@app.delete("/api/documents/{document_id}", status_code=status.HTTP_200_OK)
+async def delete_document(
+    document_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    # Verify document exists and belongs to current user
+    result = await db.execute(
+        select(DBDocument)
+        .where(DBDocument.id == document_id, DBDocument.user_id == current_user.id)
+    )
+    document = result.scalars().first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Delete file from disk
+    if os.path.exists(document.file_path):
+        try:
+            os.remove(document.file_path)
+        except Exception as e:
+            logger.error(f"Failed to remove document file from disk: {e}")
+    
+    # Delete from database
+    await db.delete(document)
+    await db.commit()
+    
+    # Schedule embedding deletion asynchronously
+    background_tasks.add_task(
+        delete_document_embeddings_async,
+        document_id=document_id
+    )
+    
+    return {"detail": "Document deletion scheduled successfully"}
 
 @app.get("/api/documents/{document_id}/status")
 async def get_document_status(
@@ -183,7 +181,10 @@ async def get_document_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(DBDocument).where(DBDocument.id == document_id))
+    result = await db.execute(
+        select(DBDocument)
+        .where(DBDocument.id == document_id, DBDocument.user_id == current_user.id)
+    )
     document = result.scalars().first()
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -193,21 +194,36 @@ async def get_document_status(
         "page_count": document.page_count
     }
 
-# SSE Chat and Query Route
+# SSE Chat and Query Route (Document-centric)
 @app.post("/api/chat/query")
 async def chat_query(
     request: ChatQueryRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
-    if not request.experiment_ids:
-        raise HTTPException(status_code=400, detail="Must select at least one experiment scope.")
+    # Verify document exists and belongs to user
+    db_result = await db.execute(
+        select(DBDocument)
+        .where(DBDocument.id == request.document_id, DBDocument.user_id == current_user.id)
+    )
+    document = db_result.scalars().first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found or access denied")
+
+    # Save user message to chat history
+    user_message = ChatMessage(
+        document_id=request.document_id,
+        user_id=current_user.id,
+        role="user",
+        content=request.query
+    )
+    db.add(user_message)
+    await db.commit()
 
     async def event_generator():
         try:
-            # 1. Retrieve context chunks scoped by experiment_ids
-            # Query the database to fetch chunks with metadata filter
-            # Let's retrieve context
-            contexts = retrieve_contexts(request.query, request.experiment_ids, top_k=15, top_n=5)
+            # 1. Retrieve context chunks scoped by document_id
+            contexts = retrieve_contexts(request.query, [request.document_id], top_k=15, top_n=5)
             
             if not contexts:
                 yield {
@@ -216,7 +232,7 @@ async def chat_query(
                 }
                 yield {
                     "event": "token",
-                    "data": "I couldn't find any relevant clinical documentation in the selected experiments to answer your query. Please upload documents first or refine your search."
+                    "data": "I couldn't find any relevant clinical documentation in this document to answer your query. Please try rephrasing your question."
                 }
                 yield {"event": "end", "data": ""}
                 return
@@ -250,12 +266,11 @@ async def chat_query(
             
             # 2. System and User Prompt construction
             system_prompt = (
-                "You are the RCG Scientific Assistant, an expert in clinical documentation and biostatistics at Sanofi.\n"
-                "Your objective is to answer the user's queries using only the provided context chunks.\n"
+                "You are the RCG Scientific Assistant, an expert in clinical documentation and biostatistics.\n"
+                "Your objective is to answer the user's queries using only the provided context chunks from this document.\n"
                 "You must cite your sources in the text using bracket format corresponding to the sources, e.g. [Source 1], [Source 2], etc.\n"
                 "If the context contains table data (demographics, features, metrics, endpoints), summarize or contrast them clearly.\n"
-                "If multiple documents are provided in the context, synthesize the findings across them to provide comparative statistics.\n"
-                "If you cannot find the answer in the provided documents, state clearly: 'Based on the provided documentation, I could not find information to answer this query.' Do not make up answers.\n"
+                "If you cannot find the answer in the provided document, state clearly: 'Based on the provided documentation, I could not find information to answer this query.' Do not make up answers.\n"
                 "Maintain a strictly professional, clinical, and helpful tone."
             )
             
@@ -264,15 +279,28 @@ async def chat_query(
                 HumanMessage(content=f"Context Document Chunks:\n{context_str}\n\nQuestion: {request.query}")
             ]
             
-            # 3. Stream tokens from LLM
+            # 3. Stream tokens from LLM and build response
             llm = get_llm()
+            full_response = ""
             async for chunk in llm.astream(messages):
+                full_response += chunk.content
                 yield {
                     "event": "token",
                     "data": chunk.content
                 }
                 
             yield {"event": "end", "data": ""}
+
+            # Save assistant message to chat history
+            assistant_message = ChatMessage(
+                document_id=request.document_id,
+                user_id=current_user.id,
+                role="assistant",
+                content=full_response,
+                sources=sources
+            )
+            db.add(assistant_message)
+            await db.commit()
             
         except Exception as e:
             logger.error(f"Error in chat SSE streaming: {e}", exc_info=True)
@@ -283,3 +311,32 @@ async def chat_query(
             yield {"event": "end", "data": ""}
 
     return EventSourceResponse(event_generator())
+
+# Chat History Routes
+@app.get("/api/documents/{document_id}/chat-history", response_model=ChatHistoryResponse)
+async def get_chat_history(
+    document_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    # Verify document exists and belongs to user
+    db_result = await db.execute(
+        select(DBDocument)
+        .where(DBDocument.id == document_id, DBDocument.user_id == current_user.id)
+    )
+    document = db_result.scalars().first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found or access denied")
+
+    # Get chat history
+    result = await db.execute(
+        select(ChatMessage)
+        .where(ChatMessage.document_id == document_id)
+        .order_by(ChatMessage.created_at.asc())
+    )
+    messages = result.scalars().all()
+    
+    return ChatHistoryResponse(
+        document_id=document_id,
+        messages=messages
+    )

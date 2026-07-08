@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sanofi RCG Scientific Assistant</title>
+    <title>Clinical RAG Assistant</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -32,7 +32,7 @@
                         </linearGradient>
                     </defs>
                 </svg>
-                <h2>sanofi</h2>
+                <h2>Clinical RAG</h2>
                 <p class="subtitle">RCG Scientific Assistant</p>
             </div>
 
@@ -84,14 +84,13 @@
                         </linearGradient>
                     </defs>
                 </svg>
-                <span class="brand-name">sanofi</span>
+                <span class="brand-name">Clinical RAG</span>
                 <span class="divider">|</span>
                 <span class="portal-name">RCG Scientific Assistant</span>
             </div>
             
             <nav class="nav-links">
-                <a href="#" class="nav-link active" id="nav-experiments">Experiments</a>
-                <a href="https://www.sanofi.com" target="_blank" class="nav-link">Documentation</a>
+                <a href="#" class="nav-link active" id="nav-documents">Documents</a>
             </nav>
 
             <div class="header-actions">
@@ -102,52 +101,50 @@
 
         <!-- Main Content Area -->
         <main class="main-content">
-            <!-- Sidebar Panel: Controls & Create -->
+            <!-- Sidebar Panel: Document Upload -->
             <section class="side-controls">
                 <div class="glass-panel card-panel">
-                    <h3>Experiment Controls</h3>
-                    <p class="panel-desc">Select experiments in the list to enable vector scoping or cross-document clinical analysis. You can also create a new experiment run.</p>
-                    <button id="btn-new-exp-modal" class="btn-primary flex-center">
+                    <h3>Document Management</h3>
+                    <p class="panel-desc">Upload clinical documents to ingest and analyze with the RAG assistant. Each document has its own dedicated chat interface.</p>
+                    <button id="btn-upload-doc-modal" class="btn-primary flex-center">
                         <svg class="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
                         </svg>
-                        New RCG Experiment
+                        Upload Document
                     </button>
                 </div>
                 
                 <div class="glass-panel card-panel stats-panel">
-                    <h4>Current Scope Selection</h4>
-                    <div id="selected-list-placeholder" class="selected-list-placeholder">
-                        No experiments selected. Check boxes in the table to load documentation into the AI.
+                    <h4>Active Document</h4>
+                    <div id="active-doc-placeholder" class="selected-list-placeholder">
+                        No document selected. Click "Chat" on a document to start the RAG assistant.
                     </div>
-                    <div id="selected-experiments-chips" class="selected-experiments-chips hidden"></div>
+                    <div id="active-doc-chip" class="selected-experiments-chips hidden"></div>
                 </div>
             </section>
 
-            <!-- Table Panel: Experiment List -->
+            <!-- Table Panel: Document List -->
             <section class="table-container-section">
                 <div class="glass-panel table-panel">
                     <div class="table-header-row">
-                        <h3>RCG Models & Experiments</h3>
+                        <h3>Clinical Documents</h3>
                         <div class="table-actions">
-                            <input type="text" id="experiment-search" placeholder="Search experiments...">
+                            <input type="text" id="document-search" placeholder="Search documents...">
                         </div>
                     </div>
 
                     <div class="table-scroll-wrapper">
-                        <table id="experiments-table">
+                        <table id="documents-table">
                             <thead>
                                 <tr>
-                                    <th style="width: 40px;"><input type="checkbox" id="check-all-experiments"></th>
-                                    <th>Experiment Name</th>
-                                    <th>Disease Area</th>
-                                    <th>DS Model Type</th>
+                                    <th>Document Name</th>
                                     <th>Status</th>
-                                    <th>Date Created</th>
+                                    <th>Pages</th>
+                                    <th>Date Uploaded</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
-                            <tbody id="experiments-tbody">
+                            <tbody id="documents-tbody">
                                 <!-- Loaded dynamically via JS -->
                             </tbody>
                         </table>
@@ -157,63 +154,20 @@
         </main>
     </div>
 
-    <!-- Create Experiment Modal -->
-    <div id="new-experiment-modal" class="modal hidden">
+    <!-- Document Upload Modal -->
+    <div id="upload-doc-modal" class="modal hidden">
         <div class="modal-content glass-panel">
             <div class="modal-header">
-                <h3>Create New RCG Experiment Run</h3>
-                <button class="btn-close" id="btn-close-modal">&times;</button>
+                <h3>Upload Clinical Document</h3>
+                <button class="btn-close" id="btn-close-upload-modal">&times;</button>
             </div>
-            <form id="new-experiment-form">
-                <div class="input-group">
-                    <label for="exp-name">Experiment / Analysis Run Name</label>
-                    <input type="text" id="exp-name" required placeholder="e.g. Crohn_Trial_Comparator_2026">
-                </div>
-                <div class="input-group">
-                    <label for="exp-disease">Disease Area / Cohort</label>
-                    <input type="text" id="exp-disease" required placeholder="e.g. Crohn's Disease">
-                </div>
-                <div class="input-group">
-                    <label for="exp-model-type">Data Science Model Type</label>
-                    <select id="exp-model-type" required>
-                        <option value="Prognostic Model">Prognostic Model</option>
-                        <option value="Endpoint Analysis Model">Endpoint Analysis Model</option>
-                        <option value="Natural History of Disease Model">Natural History of Disease Model</option>
-                        <option value="Comparator Study">Comparator Study</option>
-                    </select>
-                </div>
-                <div class="modal-actions">
-                    <button type="button" class="btn-secondary" id="btn-cancel-modal">Cancel</button>
-                    <button type="submit" class="btn-primary">Create Run</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Document Upload / Management Modal -->
-    <div id="docs-modal" class="modal hidden">
-        <div class="modal-content glass-panel docs-modal-content">
-            <div class="modal-header">
-                <h3 id="docs-modal-title">Clinical Documents: Experiment</h3>
-                <button class="btn-close" id="btn-close-docs-modal">&times;</button>
-            </div>
-            <div class="docs-modal-body">
-                <!-- Upload Box -->
-                <div class="upload-dropzone" id="upload-dropzone">
-                    <svg class="upload-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
-                    </svg>
-                    <p class="upload-text">Drag & Drop Experiment PDF here, or <span class="browse-link">browse files</span></p>
-                    <input type="file" id="doc-file-input" accept="application/pdf" class="hidden">
-                    <span class="file-limits">Only PDF documents are supported for clinical analysis.</span>
-                </div>
-
-                <div class="docs-list-section">
-                    <h4>Ingested Clinical Analyses</h4>
-                    <div class="docs-scroll-list" id="docs-scroll-list">
-                        <!-- Loaded dynamically via JS -->
-                    </div>
-                </div>
+            <div class="upload-dropzone" id="upload-dropzone">
+                <svg class="upload-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                </svg>
+                <p class="upload-text">Drag & Drop PDF here, or <span class="browse-link">browse files</span></p>
+                <input type="file" id="doc-file-input" accept="application/pdf" class="hidden">
+                <span class="file-limits">Only PDF documents are supported for clinical analysis.</span>
             </div>
         </div>
     </div>
@@ -236,21 +190,21 @@
                 </svg>
                 <div>
                     <h4>RCG Scientific Assistant</h4>
-                    <p id="chat-scoped-sub" class="chat-sub">Scoped: 0 experiments</p>
+                    <p id="chat-scoped-sub" class="chat-sub">Document: None selected</p>
                 </div>
             </div>
             <button class="btn-close-chat" id="btn-close-chat">&times;</button>
         </div>
 
-        <!-- Scoped Chunks/Documents Drawer -->
+        <!-- Active Document Info -->
         <div class="chat-scope-info" id="chat-scope-info">
-            <!-- Dynamically populated selected documents list -->
+            <!-- Dynamically populated active document info -->
         </div>
 
         <div class="chat-messages" id="chat-messages">
             <div class="message assistant-message glass-message">
-                <p>Hello! I am your RCG Scientific Assistant. I have indexed the clinical documents from your selected experiments.</p>
-                <p>Ask me anything regarding statistical results, comparator outcomes, patient demographics, endpoints, or formulas across these analysis sets.</p>
+                <p>Hello! I am your RCG Scientific Assistant. Select a document and ask me questions about its content.</p>
+                <p>I can help you analyze clinical results, patient demographics, endpoints, and other information from your documents.</p>
             </div>
         </div>
 
@@ -262,8 +216,8 @@
             </div>
             
             <form id="chat-form" class="chat-form">
-                <input type="text" id="chat-input" required placeholder="Ask a question about your clinical results...">
-                <button type="submit" id="btn-send-chat" class="btn-send">
+                <input type="text" id="chat-input" required placeholder="Ask a question about this document..." disabled>
+                <button type="submit" id="btn-send-chat" class="btn-send" disabled>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="send-icon">
                         <line x1="22" y1="2" x2="11" y2="13"/>
                         <polygon points="22 2 15 22 11 13 2 9 22 2"/>
@@ -277,5 +231,7 @@
     <div id="alert-toast" class="alert-toast hidden">
         <span id="alert-toast-message">Notification message</span>
     </div>
+    <!-- Main Javascript Logic -->
+    <script src="js/app.js"></script>
 </body>
 </html>
